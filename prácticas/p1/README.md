@@ -1,7 +1,5 @@
 # Detectando el bosón de Higgs
 
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/jgromero/sige2021/prácticas/p1/master?urlpath=rstudio)
-
 En este ejercicio se analizarán datos del experimento ATLAS del CERN-LHC, que perseguía la identificación experimental de la partícula bosón de Higgs.
 
 El problema consiste en predecir si un registro de evento corresponde al decaimiento de un bosón de Higgs o se trata de ruido de fondo.
