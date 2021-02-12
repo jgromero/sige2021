@@ -1,0 +1,5 @@
+library(knitr)
+library(tidyverse)
+library(httr)
+library(funModeling)
+library(DataExplorer)
