@@ -47,13 +47,16 @@ iris_data <- read_delim(params$datos, delim = " ")
 names(iris_data) <- make.names(names(iris_data), unique=TRUE)
 head(iris)
 ```
+
 ## Histograma
+
 ```{r histograma}
 ggplot(data = iris_data) + 
   geom_histogram(aes(x = sepal.length), bins = params$n_bins)
 ```
 
 ## Gráfico de dispersión
+
 ```{r dispersion, echo=FALSE}
 ggplot(data = iris_data) + 
   geom_point(aes_string(x = params$comparar_x, y = params$comparar_y, color = "class", shape = "class"))  +

@@ -1,5 +1,4 @@
 library(tidyverse)
-
 # Leer datos
 iris_data <- read_delim("iris.csv", delim = " ")
 head(iris)
@@ -32,7 +31,7 @@ ggplot(data = iris_data) +
 g <- ggplot(data = iris_data) 
 
 g  + 
-  geom_point(aes(x = petal.length, y = petal.width, color=class))
+  geom_point(aes(x = petal.length, y = petal.width, color=class)) +
   labs(x = "Petal Length", y = "Petal Width") +  
   scale_color_discrete(name ="Clase", labels=c("Iris Setosa", "Iris Versicolor", "Iris Virginica"))
 

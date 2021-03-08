@@ -2,7 +2,7 @@
 # Uso de variables en R:
 a <- 5
 b <- 7
-a + b
+
 
 # Vectores:
 V <- c(a, b, 9)
@@ -52,4 +52,3 @@ power <- function(x) {
   return(r)
 }
 power(x=7)
-```
