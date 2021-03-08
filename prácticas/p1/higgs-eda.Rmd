@@ -113,8 +113,8 @@ ggplot(training_data) +
 Utilizando [Shiny](https://shiny.rstudio.com/), se puede extender para todas las variables (sin `NA`s).
 
 ```{r densidad-interactiva, echo=FALSE}
-cols <- 
-  select_if(training_data, ~ !any(is.na(.))) %>%
+cols <- training_data %>%
+  select_if(~ !any(is.na(.))) %>%
   select(starts_with(c("DER", "PRI"))) %>%
   names() %>%
   sort()
