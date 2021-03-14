@@ -1,0 +1,205 @@
+---
+title: "Clasificación con conjunto de datos sobre desinformación"
+author: "Juan Gómez Romero"
+date: "4 de marzo de 2021"
+output:
+  html_document:
+      code_folding: "show"
+      toc: true
+      toc_depth: 2
+      toc_float: true
+      df_print: paged
+---
+
+Este cuaderno está basado en el trabajo del artículo ([Oehmichen et al. 2019](https://ieeexplore.ieee.org/document/8819953)), en el que se demuestra que las cuentas de Twitter que crearon y difundieron desinformación en las elecciones presidenciales de EE.UU. en 2016 exhibieron un comportamiento diferente a las cuentas normales. Estos hallazgos sugieren que la _ingenería_ de la desinformación parece explotar rasgos humanos como la reciprocidad y el sesgo de confirmación.
+
+> A. Oehmichen, K. Hua, J. Amador Díaz López, M. Molina-Solana, J. Gómez-Romero and Y. Guo, "Not All Lies Are Equal. A Study Into the Engineering of Political Misinformation in the 2016 US Presidential Election," in IEEE Access, vol. 7, pp. 126305-126314, 2019, doi: [10.1109/ACCESS.2019.2938389](https://ieeexplore.ieee.org/document/8819953).
+
+Los datos completos pueden descargarse de [Zenodo](https://zenodo.org/record/1048826).
+
+# Lectura e inspección de datos
+
+## Carga de datos
+
+```{r carga}
+library(tidyverse)
+library(readxl)
+data_raw <- read_excel('twitter_fakenews_USElections_2016.xlsx', sheet = 1, na = c('UNKNOWN'))
+data_raw
+```
+## Transformación de datos fecha
+
+```{r fechas}
+Sys.setlocale("LC_ALL","C")  # Locale for date format
+data_raw$created_at <- as.POSIXct(data_raw$created_at, tz="GMT", format="%a %b %d %H:%M:%S +0000 %Y")
+data_raw
+```
+
+## Estado de los datos
+
+```{r estado}
+library(funModeling)
+df_status(data_raw)
+```
+
+# Filtrado de información (solo tuits virales, sin NAs)
+
+```{r filtrado}
+data <- data_raw %>% 
+  filter(retweet_count > 1000) %>%
+  na.exclude()
+
+ggplot(data) +
+  geom_histogram(aes(x = is_fake_news, fill = is_fake_news), stat = 'count')
+```
+
+# Análisis exploratorio
+
+```{r proporciones}
+table(data$is_fake_news)
+prop.table(table(data$is_fake_news))
+```
+
+```{r proporciones-grafico}
+ggplot(data) +
+  geom_histogram(aes(x = is_fake_news, fill = is_fake_news), stat = 'count')
+```
+
+```{r evolucion-temporal}
+library(scales)
+ggplot(data) +
+  geom_histogram(aes(x = created_at, fill = is_fake_news ))  +
+  scale_x_datetime(breaks=date_breaks('2 months'), labels = date_format("%b"))
+```
+
+# Extracción de características del texto
+
+```{r mas-caracteristicas}
+data_extended <- 
+  data %>%
+  mutate(tweet_text_exclamations = str_count(text, "!")) %>%
+  mutate(tweet_text_caps = str_count(text, "[A-Z]")) %>%
+  mutate(tweet_text_digits = str_count(text, "[0-9]")) %>%
+  mutate(tweet_text_emojis = str_count(text, '[\U{1F300}-\U{1F6FF}]')) %>%
+  mutate(tweet_text_emoji_flag = str_count(text, '\U{1F1FA}|\U{1F1F8}]')) 
+```
+
+# Estudio de relaciones y correlaciones
+```{r distribucion-exclamaciones}
+ggplot(data_extended) + 
+  geom_density(aes(x=tweet_text_emojis, color=is_fake_news, fill=is_fake_news), alpha = 0.5)  +
+  scale_x_continuous(trans="log10")
+```
+
+```{r distribucion-followers}
+ggplot(data_extended) + 
+  geom_density(aes(x=user_followers_count, color=is_fake_news, fill=is_fake_news), alpha = 0.5)  +
+  scale_x_continuous(trans="log10")
+```
+
+```{r correlaciones}
+correlation_table(data_extended, target='is_fake_news')
+```
+
+# Predicción automática (rpart)
+
+## Preprocesamiento
+
+```{r seleccion-variables}
+library(caret)
+data_classification <-
+  data_extended %>%
+  mutate(is_fake_news = as.factor(ifelse(is_fake_news, 'Yes', 'No'))) %>%
+  select(-one_of('tweet_id', 'created_at', 'text', 'user_screen_name')) 
+```
+
+## Parámetros del algoritmo de aprendizaje
+
+```{r parametros-aprendizaje}
+rpartCtrl <- trainControl(classProbs = TRUE)
+rpartParametersGrid <- expand.grid(.cp = c(0.01, 0.05))
+```
+
+## Conjuntos de entrenamiento y validación
+
+```{r particion-datos}
+set.seed(0)
+trainIndex <- createDataPartition(data_classification$is_fake_news, p = .7, list = FALSE)
+train <- data_classification[trainIndex, ] 
+val   <- data_classification[-trainIndex, ]
+```
+
+## Entrenamiento del modelo
+
+```{r entrenamiento}
+rpartModel <- train(is_fake_news ~ ., 
+                    data = train, 
+                    method = "rpart", 
+                    metric = "Accuracy", 
+                    trControl = rpartCtrl, 
+                    tuneGrid = rpartParametersGrid)
+```
+
+```{r visualizacion}
+rpartModel
+rpartModel$finalModel
+
+library(rpart.plot)
+rpart.plot(rpartModel$finalModel)
+```
+
+## Validación del modelo
+
+```{r validacion}
+rpartModel$xlevels[["tweet_source"]] <- union(rpartModel$xlevels[["tweet_source"]], levels(as.factor(val$tweet_source))) # !!
+
+prediction <- predict(rpartModel, val, type = "raw") 
+cm_train <- confusionMatrix(prediction, val[["is_fake_news"]])
+cm_train
+```
+
+```{r prediccion}
+prediction <- predict(rpartModel, val, type = "prob") 
+```
+
+# Predicción automática (redes neuronales)
+
+## Parámetros del algoritmo de aprendizaje
+
+```{r parametros-aprendizaje-rf}
+rfCtrl <- trainControl(classProbs = TRUE)
+rfParametersGrid <- expand.grid(.mtry = c(1, sqrt(ncol(train)), 3, 4))
+```
+
+## Entrenamiento del modelo
+
+```{r entrenamiento-rf}
+rfModel <- train(is_fake_news ~ ., 
+                    data = train, 
+                    method = "rf", 
+                    metric = "Accuracy", 
+                    trControl = rfCtrl, 
+                    tuneGrid = rfParametersGrid)
+```
+
+```{r visualization-rf}
+rfModel
+rfModel$finalModel
+
+plot(rfModel)
+plot(rfModel$finalModel)
+```
+
+## Validación del modelo
+
+```{r validacion-rf}
+rfModel$xlevels[["tweet_source"]] <- union(rfModel$xlevels[["tweet_source"]], levels(as.factor(val$tweet_source))) # !!
+
+prediction <- predict(rfModel, val, type = "raw") 
+cm_train <- confusionMatrix(prediction, val[["is_fake_news"]])
+cm_train
+```
+
+```{r prediccion-rf}
+prediction <- predict(rfModel, val, type = "prob") 
+```
