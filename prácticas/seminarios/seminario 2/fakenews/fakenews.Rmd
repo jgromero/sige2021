@@ -162,7 +162,7 @@ cm_train
 prediction <- predict(rpartModel, val, type = "prob") 
 ```
 
-# Predicción automática (redes neuronales)
+# Predicción automática (random forest)
 
 ## Parámetros del algoritmo de aprendizaje
 
