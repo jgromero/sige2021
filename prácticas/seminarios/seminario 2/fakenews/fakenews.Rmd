@@ -116,7 +116,7 @@ data_classification <-
 ## Parámetros del algoritmo de aprendizaje
 
 ```{r parametros-aprendizaje}
-rpartCtrl <- trainControl(classProbs = TRUE)
+rpartCtrl <- trainControl(classProbs = TRUE) # añadir: method = "cv", number = 10
 rpartParametersGrid <- expand.grid(.cp = c(0.01, 0.05))
 ```
 
