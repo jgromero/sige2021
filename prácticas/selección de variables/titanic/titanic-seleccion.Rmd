@@ -114,14 +114,14 @@ roc_validation <- plot.roc(auc,
 # Importancia de las variables con modelo de predicción
 Una vez que los modelos han sido entrenados, podemos estudiar la importancia que cada otorga a las variabales utilizando [<tt>varImp</tt>](https://topepo.github.io/caret/variable-importance.html) en [<tt>caret</tt>](http://topepo.github.io/caret/):
 
-```{r}
+```{r importancia-variables1}
 varImp(rpartModel)
 varImp(rfModel)
 ```
 
 El ranking obtenido puede servir para seleccionar las variables que se utilizarán para abordar el problema; por ejemplo aquellas con valor `Overall` por encima de 25. Esta selección se puede automatizar parcialmente, ya que tanto <tt>rpart</tt> como <tt>rf</tt> usan variables 'dummy' (por ejemplo, `Sexmale`) que no están en el dataset original.
 
-```{r}
+```{r importancia-variables2}
 important_vars <- varImp(rfModel)$importance %>%
   rownames_to_column() %>%
   filter(Overall > 25) %>%
@@ -129,7 +129,7 @@ important_vars <- varImp(rfModel)$importance %>%
 ```
 
 El orden de importancia se corresponden aproximadamente con el valor absoluto de correlación entre cada variable y la variable objetivo:
-```{r}
+```{r importancia-correlacion}
 # correlation_table(data, target='Survived')
 data_num <-
   data %>%
@@ -140,7 +140,7 @@ cor(data_num)
 ```
 
 Visualmente, podemos verlo como tabla de correlación o como mapa de calor:
-```{r}
+```{r visualizacion-correlacion}
 rcorr(as.matrix(data_num))
 corrplot(cor(data_num), type = "upper", diag = F, order = "hclust", tl.col = "black", tl.srt = 45)
 heatmap(x = cor(data_num), symm = TRUE)
@@ -154,13 +154,13 @@ También se puede conocer la importancia de las variables sin crear explícitame
 * ig: information gain
 * gr: gain ratio
 
-```{r}
+```{r ranking-vars}
 var_rank_info(data, "Survived")
 ```
 
 # Entrenamiento del modelo con selección de variables
 Una vez determinadas las variables importantes, podemos entrenar modelos seleccionando solamente estas variables importantes:
-```{r}
+```{r entrenamiento-seleccion}
 data_reduced <-
   data %>%
   select(Survived, Sex, Fare, Age, Pclass, SibSp)
@@ -172,20 +172,130 @@ val   <- data_reduced[-trainIndex, ]
 # rpart
 rpartModel_2 <- train(Survived ~ ., data = train, method = "rpart", metric = "ROC", trControl = rpartCtrl, tuneGrid = rpartParametersGrid)
 predictionValidationProb <- predict(rpartModel_2, val, type = "prob")
-auc_rpart <- roc(val$Survived, predictionValidationProb[["Yes"]], levels = unique(val[["Survived"]]))
-auc_rpart
-roc_rpart <- plot.roc(auc_rpart, ylim=c(0,1), type = "S" , print.thres = T, main=paste('Validation AUC:', round(auc_rpart$auc[[1]], 2)))
+auc_rpart_2 <- roc(val$Survived, predictionValidationProb[["Yes"]], levels = unique(val[["Survived"]]))
+auc_rpart_2
+roc_rpart_2 <- plot.roc(auc_rpart_2, ylim=c(0,1), type = "S" , print.thres = T, main=paste('Validation AUC:', round(auc_rpart_2$auc[[1]], 2)))
 
 # rf
 rfModel_2 <- train(Survived ~ ., data = train, method = "rf", metric = "ROC", trControl = rpartCtrl)
 predictionValidationProb <- predict(rfModel_2, val, type = "prob")
-auc_rf <- roc(val$Survived, predictionValidationProb[["Yes"]], levels = unique(val[["Survived"]]))
-auc_rf
-roc_rf <- plot.roc(auc_rf, ylim=c(0,1), type = "S" , print.thres = T, main=paste('Validation AUC:', round(auc_rf$auc[[1]], 2)))
+auc_rf_2 <- roc(val$Survived, predictionValidationProb[["Yes"]], levels = unique(val[["Survived"]]))
+auc_rf_2
+roc_rf_2 <- plot.roc(auc_rf_2, ylim=c(0,1), type = "S" , print.thres = T, main=paste('Validation AUC:', round(auc_rf_2$auc[[1]], 2)))
 
 # comparacion
-roc.test(roc_rf, roc_rpart)
+roc.test(roc_rf_2, roc_rpart_2)
 
-plot.roc(auc_rpart, type = "S", col="#1c61b6")
-lines.roc(auc_rf, type = "S", col="#008600")
+plot.roc(auc_rf_2, type = "S", col="#1c61b6")
+lines.roc(roc_rpart_2, type = "S", col="#008600")
+```
+
+# Bola extra: PCA
+Para hacer la selección de variables podemos utilizar también otras técnicas geométricas, como PCA o tSNE.
+
+PCA (Principal Component Analysis) es una técnica clásica de reducción de dimensionalidad. Está basada en la proyección geométrica de los datos desde el espacio vectorial original a un espacio de menor dimensión. Esta proyección minimiza la pérdida debida a esta compresión y se construye a partir de los autovalores de la matriz de covarianza. 
+
+## PCA con `prcomp()`
+Existen varias implementaciones de PCA para R. La más básica es `prcomp()`, que no requiere paquetes adicionales. PCA trabaja con valores numéricos, por lo que es necesario en primer lugar recodificar las variables categóricas.
+
+```{r conversion-numerica}
+train_num <-
+  data[trainIndex, ]  %>%
+  mutate_if(is.character, as.factor) %>%
+  mutate_if(is.factor, as.numeric)
+
+val_num <-
+  data[-trainIndex, ]  %>%
+  mutate_if(is.character, as.factor) %>%
+  mutate_if(is.factor, as.numeric)
+```
+
+Ahora podemos aplicar `prcomp()`:
+```{r pca-prcomp}
+pca <- prcomp(train_num[,-1], scale=TRUE)
+summary(pca)
+```
+Hemos obtenido 7 componentes principales. La componente principal `PC1` explica el 28% de la varianza del conjunto de datos (de entrenamiento). Esto significa que, dada una instancia del conjunto de entrada, solamente necesitamos conocer `PC1` para tener una idea muy certera de donde se sitúa con respecto a otras instancias. Si añadimos `PC2`-`PC6`, tenemos que todas juntas explican el 94.85% de la varianza y nos dan una aproximación bastante más certera.
+
+Para visualizar gráficamente la proyección podemos usar `ggbiplot` del paquete [<tt>ggbiplot</tt>](https://github.com/vqv/ggbiplot). 
+
+```{r pca-visualizacion}
+library(ggbiplot)
+ggbiplot(pca, groups = as.factor(train_num$Sex), ellipse = TRUE) + 
+  scale_colour_manual(name="Sex", labels= c("Female", "Male"), values= c("orange", "lightblue"))
+```
+
+Con las componentes principales calculadas, podemos entrenar un modelo con la proyección obtenida con un subconjunto de componentes principales; por ejemplo, `PC1` a `PC4`. La proyección se realiza con la función `predict()` sobre un objeto `pca` (no confundir con el `predict()` de <tt>caret</tt>).
+
+```{r rpart-pca-entrenamiento}
+train_samples_proj <- predict(pca, train_num)
+train_proj <- as_tibble(train_samples_proj[,1:4]) %>%
+  mutate(Survived = train$Survived)
+
+# rpart con PCA
+rpartModel_3 <- train(Survived ~ ., 
+                      data = train_proj, 
+                      method = "rpart",
+                      metric = "ROC", 
+                      trControl = rpartCtrl, 
+                      tuneGrid = rpartParametersGrid)
+
+rpartModel_3
+rpart.plot(rpartModel_3$finalModel)
+```
+
+Para la validación, hay que proyectar también los datos:
+
+```{r rpart-pca-validacion}
+val_samples_proj <- predict(pca, val_num)
+val_proj <- as_tibble(val_samples_proj[,1:4]) %>%
+  mutate(Survived = val$Survived)
+
+predictionValidationProb <- predict(rpartModel_3, val_proj, type = "prob")
+
+auc_rpart_3 <- roc(val_proj$Survived, predictionValidationProb[["Yes"]], levels = unique(val_proj[["Survived"]]))
+auc_rpart_3
+roc_rpart_3 <- plot.roc(auc_rpart_3, ylim=c(0,1), type = "S" , print.thres = T, main=paste('Validation AUC:', round(auc_rpart_3$auc[[1]], 2)))
+```
+
+## PCA con <tt>caret</tt>
+Es posible integrar PCA dentro del flujo de trabajo de <tt>caret</tt> utilizando la función [`preProcess`](https://topepo.github.io/caret/pre-processing.html), que admite diferentes métodos de preprocesamiento.
+
+Para PCA <tt>caret</tt> utiliza internamente `prcomp()`, descartando las variables no numéricas. Al finalizar, descarta el objeto `pca` y se queda solo con las componentes principales que explican >=95% de la varianza; en este caso, las 7 componentes extraídas.
+
+```{r pca-caret}
+train_preprocess <- preProcess(data[trainIndex, -1], method = c("pca"))
+train_preprocess
+```
+A partir de los datos preprocesados, el proceso continuaría como en el ejemplo previo. Primero, los datos de entrenamiento se proyectan con `predict` y el objeto `preprocess`. Después, sobre los datos proyectados, se entrena el clasificador.
+
+```{r rpart-pca-caret-entrenamiento}
+train_samples_proj <- predict(train_preprocess, data[trainIndex, -1])
+train_proj <- as_tibble(train_samples_proj[,4:7]) %>%
+  mutate(Survived = train$Survived)
+
+# rpart con PCA
+rpartModel_4 <- train(Survived ~ ., 
+                      data = train_proj, 
+                      method = "rpart",
+                      metric = "ROC", 
+                      trControl = rpartCtrl, 
+                      tuneGrid = rpartParametersGrid)
+
+rpartModel_4
+rpart.plot(rpartModel_4$finalModel)
+```
+
+Y, finalmente, se vuelve a hacer validación, con los datos proyectados con el mismo `train_preprocess` anterior.
+
+```{r rpart-pca-caret-validacion}
+val_samples_proj <- predict(train_preprocess, data[-trainIndex, -1])
+val_proj <- as_tibble(val_samples_proj[,4:7]) %>%
+  mutate(Survived = val$Survived)
+
+predictionValidationProb <- predict(rpartModel_4, val_proj, type = "prob")
+
+auc_rpart_4 <- roc(val_proj$Survived, predictionValidationProb[["Yes"]], levels = unique(val_proj[["Survived"]]))
+auc_rpart_4
+roc_rpart_4 <- plot.roc(auc_rpart_4, ylim=c(0,1), type = "S" , print.thres = T, main=paste('Validation AUC:', round(auc_rpart_4$auc[[1]], 2)))
 ```
