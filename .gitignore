@@ -1,5 +1,4 @@
 *.DS_Store
 .Rproj.user
 *.Rhistory
-/prácticas/p1/.RData
-/prácticas/p1/.RData
+*.RData
