@@ -11,7 +11,7 @@ output:
       df_print: paged
 ---
 
-_Balanceo_ de clases con el dataset [Lending Club](https://www.lendingclub.com/info/download-data.action).
+*Balanceo* de clases con el dataset [Lending Club](https://www.lendingclub.com/info/download-data.action).
 
 Partiendo de la selección de variables realizada en un [ejercicio anterior](https://github.com/jgromero/sige2021/blob/main/pr%C3%A1cticas/selecci%C3%B3n%20de%20variables/lending%20club/lending_club_seleccion.Rmd), construiremos vamos modelos de predicción aplicando varias técnicas de balanceo (o reequilibrado) de clases.
 
@@ -27,7 +27,9 @@ set.seed(0)
 ```
 
 # Funciones generales
+
 Comenzaremos definiendo dos funciones genéricas para ajuste de niveles, obtención de ROC y creación de modelos "rf".
+
 ```{r include=FALSE}
 #Definición de funciones
 
@@ -104,6 +106,7 @@ trainRF <- function(train_data, rfCtrl = NULL, rfParametersGrid = NULL) {
 ```
 
 # Carga de datos
+
 Leemos el fichero de datos generado previamente, con la selección de variables ya hecha. Eliminamos NAs para lo que resta del cuaderno. Para simplificar el proceso, seleccionamos el 5% de los datos para entrenamiento+validación y reservamos el 20% para test.
 
 ```{r}
@@ -115,7 +118,11 @@ data <- data_raw %>%
   na.exclude() %>%
   mutate(loan_status = as.factor(loan_status))
 data
+```
 
+Atención: Esta validación está hecha con el conjunto obtenido después del "downsampling". Para hacer la comparación adecuadamente, hacemos una validación con un conjunto de datos adecuado (aquí se hace con los datos de test reservados previamente).
+
+```{r}
 # Selección de datos para test
 test <- data_raw %>%
   top_n(-round(0.2 * nrow(data_raw))) %>%
@@ -124,6 +131,7 @@ test <- data_raw %>%
 ```
 
 Se puede comprobar que existe un considerable desbalanceo de clases.
+
 ```{r warning=FALSE}
 table(data$loan_status)
 
@@ -132,6 +140,7 @@ ggplot(data) +
 ```
 
 # Crear modelo de predicción con partición aleatoria
+
 Comenzamos creando un modelo de predicción de la forma habitual, usando una partición aleatoria.
 
 Es habitual que, al haber entrenado sobre un conjunto más limitado, algunos valores de las variables categóricas que están en el conjunto de validación no hayan sido vistas por el modelo durante el entrenamiento. Esto provoca un error de tipo "nuevos niveles", por lo que es necesario rehacer los niveles añadiendo todos los valores que pudiera haber en el conjunto de validación
@@ -153,13 +162,19 @@ prediction_p <- predict(rfModel, val, type = "prob")
 prediction_r <- predict(rfModel, val, type = "raw")
 result <- my_roc(val, prediction_p, "loan_status", "Paid")
 
+# Test del modelo
+rfModel <- extend_levels(rfModel, test)
+prediction_p_test <- predict(rfModel, test, type = "prob")
+result <- my_roc(test, prediction_p_test, "loan_status", "Paid")
+
 # Guardar modelo
 orig_fit <- rfModel
 orig_roc <- result
 ```
 
 Al visualizar la validación del modelo de forma gráfica, podemos comprobar que no se hace ninguna predicción para la clase minoritaria 'Paid'.
-```{r}
+
+```{r echo=TRUE}
 plotdata <- val %>%
   select(loan_status) %>%
   bind_cols(prediction_p) %>%
@@ -172,7 +187,9 @@ ggplot(plotdata) +
 ```
 
 # Crear modelo de predicción con "downsampling"
+
 A continuación, creamos un modelo de predicción con "rf" aplicando "downsampling" con [<tt>downSample</tt>](https://rdrr.io/cran/caret/man/downSample.html):
+
 ```{r}
 # Crear dataset reducido con downsampling
 predictors <- select(data, -loan_status)
@@ -198,12 +215,18 @@ prediction_p <- predict(rfModel, val, type = "prob")
 prediction_r <- predict(rfModel, val, type = "raw")
 result <- my_roc(val, prediction_p, "loan_status", "Paid")
 
+# Test del modelo
+rfModel <- extend_levels(rfModel, test)
+prediction_p_test <- predict(rfModel, test, type = "prob")
+result <- my_roc(test, prediction_p_test, "loan_status", "Paid")
+
 # Guardar modelo
 down_fit <- rfModel
 down_roc <- result
 ```
 
-Al visualizar la validación del modelo de forma gráfica, podemos comprobar que ahora sí se hacen algunas evaluaciones para la clase minoritaria 'Paid'. 
+Al visualizar la validación del modelo de forma gráfica, podemos comprobar que ahora sí se hacen algunas evaluaciones para la clase minoritaria 'Paid'.
+
 ```{r}
 plotdata <- val %>%
   select(loan_status) %>%
@@ -216,22 +239,9 @@ ggplot(plotdata) +
   geom_bar(aes(x = loan_status, fill = Prediction), position = position_fill())
 ```
 
-*Atención*: Esta validación está hecha con el conjunto obtenido después del "downsampling". Para hacer la comparación adecuadamente, hacemos una validación con un conjunto de datos de test completo.
+También se puede visualizar el resultado del test.
 
-```{r}
-# Ajustar niveles (igual que en función extend_levels)
-for(i in 1:length(rfModel$xlevels)) {
-  var <- names(rfModel$xlevels)[[i]]
-  rfModel$xlevels[[var]] <- union(rfModel$xlevels[[var]], levels(as.factor(test[[var]])))
-}
-
-# Obtener predicciones y calcular ROC
-rfModel <- extend_levels(rfModel, test)
-prediction_p <- predict(rfModel, test, type = "prob")
-prediction_r <- predict(rfModel, test, type = "raw")
-result <- my_roc(test, prediction_p, "loan_status", "Paid")
-
-# Visualizar datos
+```{# Visualizar datos}
 plotdata <- test %>%
   select(loan_status) %>%
   bind_cols(prediction_p) %>%
@@ -242,6 +252,7 @@ ggplot(plotdata) +
 ```
 
 # Crear modelo de predicción con "upsampling"
+
 Repetimos el proceso anterior aplicando [<tt>upSample</tt>](https://rdrr.io/cran/caret/man/downSample.html):
 
 ```{r}
@@ -260,14 +271,17 @@ prediction_p <- predict(rfModel, val, type = "prob")
 prediction_r <- predict(rfModel, val, type = "raw")
 result <- my_roc(val, prediction_p, "loan_status", "Paid")
 
+# Test del modelo
+rfModel <- extend_levels(rfModel, test)
+prediction_p_test <- predict(rfModel, test, type = "prob")
+result <- my_roc(test, prediction_p_test, "loan_status", "Paid")
+
 # Guardar modelo
 up_fit <- rfModel
 up_roc <- result
 ```
 
-Al visualizar la validación del modelo de forma gráfica, podemos comprobar de nuevo que sí se hacen algunas evaluaciones para la clase minoritaria 'Paid'. 
-
-*Atención*: Esta validación está hecha con el conjunto obtenido después del "upsampling". Para hacer la comparación adecuadamente, haríamos una validación con un conjunto de datos de test completo.
+Al visualizar la validación del modelo de forma gráfica, podemos comprobar de nuevo que sí se hacen algunas evaluaciones para la clase minoritaria 'Paid'.
 
 ```{r}
 plotdata <- val %>%
@@ -281,12 +295,13 @@ ggplot(plotdata) +
   geom_bar(aes(x = loan_status, fill = Prediction), position = position_fill())
 ```
 
-
 # Crear modelo de predicción con SMOTE
-Por último, hacemos rebalanceado de clases utilizando:
-- [<tt>SMOTE</tt>](https://www.rdocumentation.org/packages/DMwR/versions/0.4.1/topics/SMOTE) de [<tt>DMwR</tt>](https://www.rdocumentation.org/packages/DMwR/versions/0.4.1)
 
-- [<tt>SMOTE</tt>](https://www.rdocumentation.org/packages/smotefamily/versions/1.3.1/topics/SMOTE) de [<tt>smotefamily</tt>](https://www.rdocumentation.org/packages/smotefamily/versions/1.3.1)
+Por último, hacemos rebalanceado de clases utilizando:
+
+-   [<tt>SMOTE</tt>](https://www.rdocumentation.org/packages/DMwR/versions/0.4.1/topics/SMOTE) de [<tt>DMwR</tt>](https://www.rdocumentation.org/packages/DMwR/versions/0.4.1)
+
+-   [<tt>SMOTE</tt>](https://www.rdocumentation.org/packages/smotefamily/versions/1.3.1/topics/SMOTE) de [<tt>smotefamily</tt>](https://www.rdocumentation.org/packages/smotefamily/versions/1.3.1)
 
 ```{r}
 # Prepara dataset para SMOTE
@@ -299,18 +314,41 @@ data_for_SMOTE <- data %>%
 # DMwR: data_smote <- SMOTE(loan_status ~ ., data_for_SMOTE, perc.over = 600, dataperc.under = 100)  
 smote <- SMOTE(data_for_SMOTE[,-1], target = data_for_SMOTE[,1], K = 10, dup_size = 6)
 data_smote <- smote$data %>%
-  mutate(loan_status = class)
-
+  rename(loan_status = class) %>%
+  mutate(loan_status = ifelse(loan_status == 1, "Paid", "Unpaid"))
+  
 table(data_smote$loan_status) 
+
+# Crear particiones aleatorias sobre el dataset ampliado con SMOTE
+trainIndex <- createDataPartition(data_smote$loan_status, p = .75, list = FALSE, times = 1)
+train <- data_smote[ trainIndex, ] 
+val   <- data_smote[-trainIndex, ]
+print("Datos de entrenamiento después de SMOTE: ")
+table(train$loan_status)
+print("Datos de validación después de SMOTE: ")
+table(val$loan_status)
 
 # Entrenar modelo
 rfModel <- trainRF(train)
 
 # Validar modelo
-rfModel <- extend_levels(rfModel, val)
-prediction_p <- predict(rfModel, val, type = "prob")
-prediction_r <- predict(rfModel, val, type = "raw")
+val_num <- val %>%
+  mutate_if(is.character, as.factor) %>%
+  mutate_if(is.factor, as.numeric) %>%
+  as.data.frame()
+
+prediction_p <- predict(rfModel, val_num, type = "prob")
+prediction_r <- predict(rfModel, val_num, type = "raw")
 result <- my_roc(val, prediction_p, "loan_status", "Paid")
+
+# Test del modelo
+test_num <- test %>%
+  mutate_if(is.character, as.factor) %>%
+  mutate_if(is.factor, as.numeric) %>%
+  as.data.frame()
+
+prediction_p_test <- predict(rfModel, test_num, type = "prob")
+result <- my_roc(test_num, prediction_p_test, "loan_status", "Paid")
 
 # Guardar modelo
 smote_fit <- rfModel
@@ -318,6 +356,7 @@ smote_roc <- result
 ```
 
 De nuevo, visualizamos la validación del modelo de forma gráfica.
+
 ```{r}
 plotdata <- val %>%
   select(loan_status) %>%
@@ -331,7 +370,9 @@ ggplot(plotdata) +
 ```
 
 # Evaluar modelos sobre el conjunto de test
+
 Para terminar, evaluamos los tres modelos sobre el conjunto de test. Se puede comprobar que el rebalanceo de clases no funciona en todos los casos.
+
 ```{r}
 ## seleccionar colores
 colors <- brewer.pal(4, "Pastel1")
@@ -341,22 +382,13 @@ roc_table <- tibble(name=character(), auc=list(), color=character())
 
 ## crear lista de modelos
 models <- c(list(orig_fit), list(down_fit), list(up_fit), list(smote_fit))
+results <- c(list(orig_roc), list(down_roc), list(up_roc), list(smote_roc))
 models_name <- c("original", "down", "up", "smote")
 
 ## añadir valores a tabla de resultados
 for(i in 1:length(models)) {
   rfModel <- models[[i]]
-  
-  ### rehacer niveles
-  for(j in 1:length(rfModel$xlevels)) {
-    var <- names(rfModel$xlevels)[[j]]
-    rfModel$xlevels[[var]] <- union(rfModel$xlevels[[var]], levels(as.factor(test[[var]])))
-  }
-  
-  ### otener predicciones y calcular ROC
-  prediction_p <- predict(rfModel, test, type = "prob")
-  prediction_r <- predict(rfModel, test, type = "raw")
-  result <- my_roc(test, prediction_p, "loan_status", "Paid", show_plot = FALSE)
+  result <- results[[i]]
   
   ### añadir fila
   roc_table <- roc_table %>%
@@ -380,6 +412,7 @@ legend("bottomright",
 ```
 
 # Resampleado dentro de train
+
 Para finalizar, se muestra cómo se puede realizar balanceado dentro del propio proceso de train:
 
 ```{r}
@@ -438,6 +471,7 @@ up_inside <- train(
 ```
 
 Para la evaluación utilizaremos la función [<tt>resamples</tt>](https://www.rdocumentation.org/packages/caret/versions/6.0-85/topics/resamples):
+
 ```{r}
 inside_models <- list(down = down_inside,
                       up = up_inside) # ,
@@ -445,5 +479,3 @@ inside_models <- list(down = down_inside,
 inside_resampling <- resamples(inside_models)
 summary(inside_resampling, metric = "ROC")
 ```
-
-
