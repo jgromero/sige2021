@@ -50,7 +50,7 @@ data_raw
 # MICE
 [MICE](https://stefvanbuuren.name/mice/) es una de las bibliotecas más completas para realizar imputación de valores perdidos.
 
-En el conjunto de datos existen valores perdidos en: 'Cabin', 'Age', 'Embarked'. Con [MICE](https://stefvanbuuren.name/mice/) podemos crear un modelo de imputación que emplee [diferentes técnicas de imputación](https://www.rdocumentation.org/packages/mice/versions/3.7.0/topics/mice) para cada columna. Con [<tt>complete</tt>](https://www.rdocumentation.org/packages/mice/versions/3.7.0/topics/complete) obtenemos el resultado de la imputación de acuerdo al modelo generado.
+En el conjunto de datos existen valores perdidos en: 'Cabin', 'Age', 'Embarked'. Con [MICE](https://stefvanbuuren.name/mice/) podemos crear un modelo de imputación que emplee [diferentes técnicas de imputación](https://www.rdocumentation.org/packages/mice/versions/3.7.0/topics/mice) para cada columna. Con [`complete`](https://www.rdocumentation.org/packages/mice/versions/3.7.0/topics/complete) obtenemos el resultado de la imputación de acuerdo al modelo generado.
 ```{r}
 imputation <- mice(data_raw, method = c("", "", "", "", "", "mean", "", "", "", "", "cart", "cart"))
 

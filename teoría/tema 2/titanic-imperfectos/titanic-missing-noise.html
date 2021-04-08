@@ -332,7 +332,7 @@ div.tocify {
 <div id="mice" class="section level1">
 <h1>MICE</h1>
 <p><a href="https://stefvanbuuren.name/mice/">MICE</a> es una de las bibliotecas más completas para realizar imputación de valores perdidos.</p>
-<p>En el conjunto de datos existen valores perdidos en: ‘Cabin’, ‘Age’, ‘Embarked’. Con <a href="https://stefvanbuuren.name/mice/">MICE</a> podemos crear un modelo de imputación que emplee <a href="https://www.rdocumentation.org/packages/mice/versions/3.7.0/topics/mice">diferentes técnicas de imputación</a> para cada columna. Con <a href="https://www.rdocumentation.org/packages/mice/versions/3.7.0/topics/complete"><tt>complete</tt></a> obtenemos el resultado de la imputación de acuerdo al modelo generado.</p>
+<p>En el conjunto de datos existen valores perdidos en: ‘Cabin’, ‘Age’, ‘Embarked’. Con <a href="https://stefvanbuuren.name/mice/">MICE</a> podemos crear un modelo de imputación que emplee <a href="https://www.rdocumentation.org/packages/mice/versions/3.7.0/topics/mice">diferentes técnicas de imputación</a> para cada columna. Con <a href="https://www.rdocumentation.org/packages/mice/versions/3.7.0/topics/complete"><code>complete</code></a> obtenemos el resultado de la imputación de acuerdo al modelo generado.</p>
 <pre class="r"><code>imputation &lt;- mice(data_raw, method = c(&quot;&quot;, &quot;&quot;, &quot;&quot;, &quot;&quot;, &quot;&quot;, &quot;mean&quot;, &quot;&quot;, &quot;&quot;, &quot;&quot;, &quot;&quot;, &quot;cart&quot;, &quot;cart&quot;))</code></pre>
 <pre><code>## 
 ##  iter imp variable
@@ -458,28 +458,28 @@ prediction_1 &lt;- predict(rPartModel_1, val, type = &quot;raw&quot;)
 ## 
 ##           Reference
 ## Prediction No Yes
-##        No  98  23
-##        Yes  8  49
-##                                          
-##                Accuracy : 0.8258         
-##                  95% CI : (0.762, 0.8785)
-##     No Information Rate : 0.5955         
-##     P-Value [Acc &gt; NIR] : 3.326e-11      
-##                                          
-##                   Kappa : 0.626          
-##                                          
-##  Mcnemar&#39;s Test P-Value : 0.01192        
-##                                          
-##             Sensitivity : 0.9245         
-##             Specificity : 0.6806         
-##          Pos Pred Value : 0.8099         
-##          Neg Pred Value : 0.8596         
-##              Prevalence : 0.5955         
-##          Detection Rate : 0.5506         
-##    Detection Prevalence : 0.6798         
-##       Balanced Accuracy : 0.8025         
-##                                          
-##        &#39;Positive&#39; Class : No             
+##        No  99  17
+##        Yes  9  53
+##                                           
+##                Accuracy : 0.8539          
+##                  95% CI : (0.7933, 0.9023)
+##     No Information Rate : 0.6067          
+##     P-Value [Acc &gt; NIR] : 4.78e-13        
+##                                           
+##                   Kappa : 0.6876          
+##                                           
+##  Mcnemar&#39;s Test P-Value : 0.1698          
+##                                           
+##             Sensitivity : 0.9167          
+##             Specificity : 0.7571          
+##          Pos Pred Value : 0.8534          
+##          Neg Pred Value : 0.8548          
+##              Prevalence : 0.6067          
+##          Detection Rate : 0.5562          
+##    Detection Prevalence : 0.6517          
+##       Balanced Accuracy : 0.8369          
+##                                           
+##        &#39;Positive&#39; Class : No              
 ## </code></pre>
 <pre class="r"><code>prediction_2 &lt;- predict(rPartModel_2, val, type = &quot;raw&quot;) 
 (cm_train_2 &lt;- confusionMatrix(prediction_2, val[[&quot;Survived&quot;]]))</code></pre>
@@ -487,28 +487,28 @@ prediction_1 &lt;- predict(rPartModel_1, val, type = &quot;raw&quot;)
 ## 
 ##           Reference
 ## Prediction No Yes
-##        No  98  23
-##        Yes  8  49
-##                                          
-##                Accuracy : 0.8258         
-##                  95% CI : (0.762, 0.8785)
-##     No Information Rate : 0.5955         
-##     P-Value [Acc &gt; NIR] : 3.326e-11      
-##                                          
-##                   Kappa : 0.626          
-##                                          
-##  Mcnemar&#39;s Test P-Value : 0.01192        
-##                                          
-##             Sensitivity : 0.9245         
-##             Specificity : 0.6806         
-##          Pos Pred Value : 0.8099         
-##          Neg Pred Value : 0.8596         
-##              Prevalence : 0.5955         
-##          Detection Rate : 0.5506         
-##    Detection Prevalence : 0.6798         
-##       Balanced Accuracy : 0.8025         
-##                                          
-##        &#39;Positive&#39; Class : No             
+##        No  99  17
+##        Yes  9  53
+##                                           
+##                Accuracy : 0.8539          
+##                  95% CI : (0.7933, 0.9023)
+##     No Information Rate : 0.6067          
+##     P-Value [Acc &gt; NIR] : 4.78e-13        
+##                                           
+##                   Kappa : 0.6876          
+##                                           
+##  Mcnemar&#39;s Test P-Value : 0.1698          
+##                                           
+##             Sensitivity : 0.9167          
+##             Specificity : 0.7571          
+##          Pos Pred Value : 0.8534          
+##          Neg Pred Value : 0.8548          
+##              Prevalence : 0.6067          
+##          Detection Rate : 0.5562          
+##    Detection Prevalence : 0.6517          
+##       Balanced Accuracy : 0.8369          
+##                                           
+##        &#39;Positive&#39; Class : No              
 ## </code></pre>
 </div>
 <div id="noisefiltersr" class="section level1">
