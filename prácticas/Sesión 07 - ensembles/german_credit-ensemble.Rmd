@@ -1,0 +1,431 @@
+---
+title: "Modelos avanzados de clasificación y ensembles con German Credit"
+author: "Juan Gómez Romero"
+date: "10 de abril de 2021"
+output:
+  html_document:
+      code_folding: "show"
+      toc: true
+      toc_depth: 2
+      toc_float: true
+      df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(funModeling)
+library(caret)
+library(pROC)
+library(rpart.plot)
+library(randomForest)
+library(caretEnsemble)
+library(xgboost)
+set.seed(0)
+```
+
+Modelos avanzados de clasificación y ensembles con el dataset [German credit](http://archive.ics.uci.edu/ml/datasets/Statlog+%28German+Credit+Data%29). Este conjunto de datos clasifica a las personas descritas por un conjunto de atributos como poseedores de un riesgo crediticio bueno o malo.
+
+En este cuaderno veremos cómo utilizar varias técnicas de clasificación diferentes (incluyendo algunas avanzadas como [xgboost](https://xgboost.readthedocs.io/en/latest/)) comparar los modelos obtenidos y combinarlos para conseguir mejores resultados.
+
+# Funciones
+Definimos funciones auxiliares de nuestro programa: cálculo de valores ROC.
+```{r}
+#' Cálculo de valores ROC
+#' @param data Datos originales
+#' @param predictionProb Predicciones
+#' @param target_var Variable objetivo de predicción
+#' @param positive_class Clase positiva de la predicción
+#' 
+#' @return Lista con valores de resultado \code{$auc}, \code{$roc}
+#' 
+#' @examples 
+#' rfModel <- train(Class ~ ., data = train, method = "rf", metric = "ROC", trControl = rfCtrl, tuneGrid = rfParametersGrid)
+#' roc_res <- my_roc(data = validation, predict(rfModel, validation, type = "prob"), "Class", "Good")
+my_roc <- function(data, predictionProb, target_var, positive_class) {
+  auc <- roc(data[[target_var]], predictionProb[[positive_class]], levels = unique(data[[target_var]]))
+  roc <- plot.roc(auc, ylim=c(0,1), type = "S" , print.thres = T, main=paste('AUC:', round(auc$auc[[1]], 2)))
+  return(list("auc" = auc, "roc" = roc))
+}
+```
+
+# Lectura y preprocesamiento
+Los datos de este problema están disponibles directamente en `caret`, así que únicamente tenemos que transformarlos a formato `tibble`.
+```{r}
+data(GermanCredit)
+data <- as_tibble(GermanCredit)
+df_status(data)
+```
+
+Se puede observar que no existe gran desequilibrio entre las clases que vamos a predecir.
+```{r}
+ggplot(data) + geom_histogram(aes(x = Class, fill = Class), stat = 'count')
+```
+
+# Modelos de clasificación clásicos
+Primero, particionamos los datos para la clasificación:
+
+```{r}
+trainIndex <- createDataPartition(data$Class, p = .75, list = FALSE)
+train <- data[ trainIndex, ] 
+val   <- data[-trainIndex, ]
+```
+
+## rpart
+
+### Entrenamiento
+Modelo 1:
+```{r}
+rpartCtrl <- trainControl(
+  verboseIter = F, 
+  classProbs = TRUE, 
+  summaryFunction = twoClassSummary)
+
+rpartParametersGrid <- expand.grid(
+  .cp = c(0.001, 0.01, 0.1, 0.5))
+
+rpartModel1 <- train(
+  Class ~ ., 
+  data = train, 
+  method = "rpart", 
+  metric = "ROC", 
+  trControl = rpartCtrl, 
+  tuneGrid = rpartParametersGrid)
+```
+
+Modelo 2 (con validación cruzada):
+```{r}
+rpartCtrl2 <- trainControl(
+  verboseIter = F, 
+  classProbs = TRUE, 
+  method = "repeatedcv",
+  number = 10,
+  repeats = 1,
+  summaryFunction = twoClassSummary)
+
+rpartModel2 <- train(Class ~ ., 
+                     data = train, 
+                     method = "rpart", 
+                     metric = "ROC", 
+                     trControl = rpartCtrl2, 
+                     tuneGrid = rpartParametersGrid)
+```
+
+### Visualización
+
+Visualización del modelo 1. (Se omite el modelo 2)
+```{r}
+rpart.plot(rpartModel1$finalModel)
+```
+
+Importancia de variables:
+```{r}
+varImp(rpartModel1)
+```
+
+
+### Validación
+
+Modelo 1:
+```{r}
+prediction     <- predict(rpartModel1, val, type = "raw")
+predictionProb <- predict(rpartModel1, val, type = "prob")
+
+auc1 <- roc(val$Class, predictionProb[["Good"]], levels = unique(val[["Class"]]))
+rpartModel1_roc <- plot.roc(auc1, ylim=c(0,1), type = "S" , print.thres = T, main=paste('Validation AUC:', round(auc1$auc[[1]], 2)))
+
+cm_val_rpartModel1 <- confusionMatrix(prediction, val[["Class"]], positive = "Good")
+```
+
+Modelo 2:
+```{r}
+prediction     <- predict(rpartModel2, val, type = "raw")
+predictionProb <- predict(rpartModel2, val, type = "prob")
+
+auc2 <- roc(val$Class, predictionProb[["Good"]], levels = unique(val[["Class"]]))
+rpartModel2_roc <- plot.roc(auc2, ylim=c(0,1), type = "S" , print.thres = T, main=paste('Validation AUC:', round(auc2$auc[[1]], 2)))
+
+cm_val_rpartModel2 <- confusionMatrix(prediction, val[["Class"]], positive = "Good")
+```
+
+## rf
+
+### Entrenamiento y validación
+
+Random forest con ajuste manual de hiperparámetro `.mtry`:
+```{r}
+rfCtrl <- trainControl(verboseIter = F, classProbs = TRUE, method = "repeatedcv", number = 10, repeats = 1, summaryFunction = twoClassSummary)
+rfParametersGrid <- expand.grid(.mtry = c(sqrt(ncol(train))))
+rfModel1 <- train(Class ~ ., data = train, method = "rf", metric = "ROC", trControl = rfCtrl, tuneGrid = rfParametersGrid)
+
+rfModel1_roc <- my_roc(val, predict(rfModel1, val, type = "prob"), "Class", "Good")
+```
+
+Random forest con ajuste manual de hiperparámetro `.mtry` utilizando un intervalo:
+```{r}
+rfCtrl <- trainControl(verboseIter = F, classProbs = TRUE, method = "repeatedcv", number = 10, repeats = 1, summaryFunction = twoClassSummary)
+rfParametersGrid <- expand.grid(.mtry = c(1:5))
+rfModel2 <- train(Class ~ ., data = train, method = "rf", metric = "ROC", trControl = rfCtrl, tuneGrid = rfParametersGrid)
+
+rfModel2_roc <- my_roc(val, predict(rfModel2, val, type = "prob"), "Class", "Good")
+```
+
+Random forest con ajuste con búsqueda aleatoria de hiperparámetro `.mtry`:
+```{r}
+rfCtrl <- trainControl(verboseIter = F, classProbs = TRUE, method = "repeatedcv", number = 10, repeats = 1, search = "random", summaryFunction = twoClassSummary)
+rfModel3 <- train(Class ~ ., data = train, method = "rf", metric = "ROC", trControl = rfCtrl, tuneLength = 15)
+
+rfModel3_roc <- my_roc(val, predict(rfModel3, val, type = "prob"), "Class", "Good")
+```
+
+Random forest con ajuste automático de hiperparámetros `.mtry` obtenido con `tuneRF()`:
+```{r}
+bestmtry <- tuneRF(val[,-10], val[[10]], stepFactor=0.75, improve=1e-5, ntree=500)
+print(bestmtry)
+
+rfCtrl <- trainControl(verboseIter = F, classProbs = TRUE, method = "repeatedcv", number = 10, repeats = 1, summaryFunction = twoClassSummary)
+rfParametersGrid <- expand.grid(.mtry = bestmtry[,1])
+rfModel4 <- train(Class ~ ., data = train, method = "rf", metric = "ROC", trControl = rfCtrl, tuneGrid = rfParametersGrid)
+
+rfModel4_roc <- my_roc(val, predict(rfModel4, val, type = "prob"), "Class", "Good")
+```
+
+Random forest con mejor hiperparámetro `.mtry` obtenido con `tuneRF()` y selección de número de árboles `ntrees` con rejilla manual:
+```{r}
+rfCtrl <- trainControl(verboseIter = F, classProbs = TRUE, method = "repeatedcv", number = 10, repeats = 1, summaryFunction = twoClassSummary)
+rfParametersGrid <- expand.grid(.mtry = bestmtry[,1])
+
+rf_modellist <- list()
+for (ntrees in c(100, 150, 200, 250)) {
+  rfModel <- train(Class ~ ., data = train, method = "rf", metric= "ROC", tuneGrid = rfParametersGrid, trControl = rfCtrl, ntree = ntrees)
+  key <- toString(ntrees)
+  rf_modellist[[key]] <- rfModel
+}
+
+results <- resamples(rf_modellist)
+summary(results)
+dotplot(results)
+bwplot(diff(results), metric = "ROC")
+```
+
+## SVM
+```{r}
+svmCtrl <- trainControl(verboseIter = F, classProbs = TRUE, method = "repeatedcv", number = 10, repeats = 1, summaryFunction = twoClassSummary)
+svmModel1 <- train(Class ~ ., data = train, method = "svmRadial", metric = "ROC", trControl = svmCtrl, tuneLength = 10)
+svmModel1_roc <- my_roc(val, predict(svmModel1, val, type = "prob"), "Class", "Good")
+```
+
+## RNA
+```{r}
+nnCtrl <- trainControl(verboseIter = F, classProbs = TRUE, method = "repeatedcv", number = 10, repeats = 1, summaryFunction = twoClassSummary)
+nnParametersGrid <- expand.grid(.decay = c(0.5, 0.1), .size = c(5, 6, 7))
+nnModel1 <- train(Class ~ ., data = train, method = "nnet", metric = "ROC", tuneGrid = nnParametersGrid, trControl = nnCtrl, trace = FALSE, maxit = 1000) 
+plot(nnModel1)
+nnModel1_roc <- my_roc(val, predict(nnModel1, val, type = "prob"), "Class", "Good")
+```
+
+## Comparación
+Construir tabla con información de los modelos:
+
+```{r}
+comparison <- tibble(
+  Algoritmo = c('Rpart 1', 'Rpart 2', 'RF 1', 'RF 2',  'RF 3',  'RF 4',  'SVM', 'NN'),
+  Descripción = c('', '', '', '', '', '', '', ''),
+  roc_object = enframe(list(rpartModel1_roc, rpartModel2_roc, rfModel1_roc$roc, rfModel2_roc$roc, rfModel3_roc$roc, rfModel4_roc$roc, svmModel1_roc$roc, nnModel1_roc$roc))[[2]],
+  auc_object = enframe(list(auc1, auc2, rfModel1_roc$auc, rfModel2_roc$auc, rfModel3_roc$auc, rfModel4_roc$auc, svmModel1_roc$auc, nnModel1_roc$auc))[[2]],
+  auc_value = c(rpartModel1_roc$auc[[1]], rpartModel2_roc$auc[[1]], rfModel1_roc$auc$auc[[1]], rfModel2_roc$auc$auc[[1]], rfModel3_roc$auc$auc[[1]], rfModel4_roc$auc$auc[[1]], svmModel1_roc$auc$auc[[1]], nnModel1_roc$auc$auc[[1]]),
+  color = sample(colors(), 8)
+)
+
+comparison
+```
+
+Se puede hacer una comparativa visual de las métricas obtenidas con `roc.test()`:
+```{r}
+## mostrar curvas en pantalla
+plot <- plot.roc(comparison[1,]$auc_object[[1]], ylim=c(0,1), type = "S", col = comparison[1,]$color)
+
+for(i in 2:nrow(comparison)) {
+  lines.roc(comparison[i,]$auc_object[[1]], type = "S",  col = comparison[i,]$color)
+}
+
+## insertar leyendas
+legend("bottomright", 
+       legend = paste0(comparison$Algoritmo, ", auc=", round(comparison$auc_value, 2)),
+       col = comparison$color,
+       lty = 1,   # tipo de linea
+       lwd = 2)   # grosor de linea 
+```
+
+# Ensembles
+Creamos múltiples modelos utilizando las [funcionalides para ensembes](https://topepo.github.io/caret/model-training-and-tuning.html) ofrecidas por `caret`. 
+
+## Lista de modelos
+La función `caretList()` nos permite entrenar varios modelos al mismo tiempo, especificando una lista de métodos:
+
+```{r}
+# Entrenamiento
+listCtrl <- trainControl(verboseIter = F, classProbs = TRUE, method = "repeatedcv", number = 10, repeats = 1, summaryFunction = twoClassSummary)
+model_list <- caretList(Class ~ ., data = train, trControl = listCtrl, methodList=c("rpart", "rf", "svmRadial", "nnet"))
+
+# Validación
+predictions_list <- predict(model_list, newdata = val)
+predictions_list
+
+# Lista de modelos
+model_list
+
+# Mostrar ROC
+rpart_roc_res <- my_roc(val, predict(model_list$rpart, val, type = "prob"), "Class", "Good")
+rf_roc_res <- my_roc(val, predict(model_list$rf, val, type = "prob"), "Class", "Good")
+svm_roc_res <- my_roc(val, predict(model_list$svm, val, type = "prob"), "Class", "Good")
+nnet_roc_res <- my_roc(val, predict(model_list$nnet, val, type = "prob"), "Class", "Good")
+
+plot.roc(rpart_roc_res$auc, ylim=c(0,1), type = "S" , print.thres = T, main=paste('AUC:', round(rpart_roc_res$auc$auc[[1]], 2)))
+plot.roc(rf_roc_res$auc, add = TRUE, col = "red", ylim=c(0,1), type = "S" , print.thres = T, main=paste('AUC:', round(rpart_roc_res$auc$auc[[1]], 2)))
+lines(svm_roc_res$auc, col = "blue")
+lines(nnet_roc_res$auc, col = "green")
+```
+
+Podemos especificar los _grids_ de parámetros de manera independiente :
+```{r}
+# Entrenamiento
+model_list <- caretList(Class~., data = train,
+  trControl = listCtrl,
+  metric= "ROC",
+  tuneList=list(
+    rpart = caretModelSpec(method="rpart",     tuneGrid = expand.grid(.cp = c(0.001, 0.01, 0.1, 0.5))),
+    rf    = caretModelSpec(method="rf",        tuneGrid = expand.grid(.mtry = c(1:5))),
+    svm   = caretModelSpec(method="svmRadial", tuneLength = 10), 
+    nnet  = caretModelSpec(method="nnet",      tuneGrid = expand.grid(.decay = c(0.5, 0.1), .size = c(5, 6, 7)), trace = FALSE)
+  )
+)
+
+# Validación
+predictions_list <- predict(model_list, newdata = val)
+head(predictions_list)
+
+# Mostrar ROC
+rpart_roc_res <- my_roc(val, predict(model_list$rpart, val, type = "prob"), "Class", "Good")
+rf_roc_res <- my_roc(val, predict(model_list$rf, val, type = "prob"), "Class", "Good")
+svm_roc_res <- my_roc(val, predict(model_list$svm, val, type = "prob"), "Class", "Good")
+nnet_roc_res <- my_roc(val, predict(model_list$nnet, val, type = "prob"), "Class", "Good")
+
+plot.roc(rpart_roc_res$auc, ylim=c(0,1), type = "S" , print.thres = T, main=paste('AUC:', round(rpart_roc_res$auc$auc[[1]], 2)))
+plot.roc(rf_roc_res$auc, add = TRUE, col = "red", ylim=c(0,1), type = "S" , print.thres = T, main=paste('AUC:', round(rpart_roc_res$auc$auc[[1]], 2)))
+lines(svm_roc_res$auc, col = "blue")
+lines(nnet_roc_res$auc, col = "green")
+```
+
+## Crear ensemble de modelos
+Con `caretEnsemble()` también podemos obtener una salida combinada de los modelos de la lista obtenida con `caretList()`. Para decidir qué modelos conviene combinar, podemos usar `xyplot()``en combinación con `resamples()`. La manera en la que se combinan los modelos para en el ensemble puede ser de tipo _greedy_ (con pesos asignados por defecto) o con una expresión más compleja (dando lugar a un `caretStack`).
+
+### Ensemble con pesos por defecto
+Observamos los pares de modelos para encontrar los más prometedores (por encima de la linea intermedia).
+```{r}
+xyplot(resamples(c(model_list[1], model_list[2])))
+xyplot(resamples(c(model_list[2], model_list[4])))
+```
+
+Elegimos varios modelos para el ensemble y reentrenamos de nuevo, cambiando _grid_ de parámetros si es necesario:
+```{r}
+model_list_selected <- caretList(Class~., data = train,
+  trControl = listCtrl,
+  metric= "ROC",
+  tuneList=list(
+    rf    = caretModelSpec(method="rf",   tuneGrid = expand.grid(.mtry = 5)),
+    nnet  = caretModelSpec(method="nnet", tuneGrid = expand.grid(.decay = 0.5, .size = 5), trace = FALSE)
+  )
+)
+```
+
+Y construimos el ensemble:
+```{r}
+greedy_ensemble <- caretEnsemble(
+  model_list_selected , 
+  metric="ROC",
+  trControl=trainControl(
+    number=2,
+    summaryFunction=twoClassSummary,
+    classProbs=TRUE
+  ))       
+summary(greedy_ensemble)
+```
+
+Podemos realizar predicciones combinadas con el ensemble para validar el modelo combinado. En este caso, obtenemos las dos columnas correspondientes a las dos categorías de clasificación, que es lo que necesitamos para la curva ROC. (Por defecto la predicción con el ensemble solo devuelve predicción para la clase positiva)
+```{r}
+ensemble_pred <- data.frame(Good = predict(greedy_ensemble, val, type = "prob"), Bad = 1-predict(greedy_ensemble, val, type = "prob"))
+my_roc(val, ensemble_pred, "Class", "Good")
+```
+
+
+### Ensemble con métodos más sofisticados
+Usamos `gbm` (combinación lineal) como método para ensamblar los resultados. `caretStack()` calcula los parámetros del método:
+
+```{r}
+custom_ensemble <- caretStack(
+  model_list_selected, 
+  method="gbm",
+  metric="ROC",
+  trControl=trainControl(
+    number=2,
+    summaryFunction=twoClassSummary,
+    classProbs=TRUE
+  ))  
+summary(custom_ensemble)
+```
+
+Y obtenemos los resultados de validación:
+```{r}
+ensemble_pred_2 <- data.frame(Good = predict(custom_ensemble, val, type = "prob"), Bad = 1-predict(custom_ensemble, val, type = "prob"))
+my_roc(val, ensemble_pred_2, "Class", "Good")
+```
+
+## xgboost
+`caret` incluye soporte para modelos de tipo xgboost, que podemos utilizar directamente dentro del marco general de trabajo.
+
+Definir [parámetros de `xgbTree`](# https://xgboost.readthedocs.io/en/latest/parameter.html) para el entrenamiento:
+```{r}
+xgbCtrl <- trainControl(
+  method = "repeatedcv",
+  number = 10,
+  repeats = 1,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary
+)
+xgbGrid <- expand.grid(
+  nrounds = 200,
+  max_depth = c(6, 8, 10),
+  eta = c(0.001, 0.003, 0.01),
+  gamma = 1,
+  colsample_bytree = 0.5,
+  min_child_weight = 6,
+  subsample = 0.5
+)
+```
+
+Entrenar:
+```{r}
+xgbModel <- train(
+  Class ~ ., 
+  data = train, 
+  method = "xgbTree", 
+  metric = "ROC", 
+  trControl = xgbCtrl,
+  tuneGrid = xgbGrid
+)
+print(xgbModel)
+plot(xgbModel)
+```
+
+Validar:
+```{r}
+my_roc(val, predict(xgbModel, val, type = "prob"), "Class", "Good")
+```
+
+Importancia de variables:
+```{r}
+imp <- xgb.importance(colnames(train), xgbModel$finalModel)
+xgb.plot.importance(imp)
+```
+
