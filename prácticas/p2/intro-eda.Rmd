@@ -1,0 +1,204 @@
+---
+title: "Deep Learning con conjunto de datos Fakeddit"
+output:
+  html_document:
+      code_folding: "show"
+      toc: true
+      toc_depth: 2
+      toc_float: true
+      df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(keras)
+library(caret)
+library(mice)
+library(rpart.plot)
+set.seed(0)
+```
+
+Clasificación con el dataset [Fakeddit](https://github.com/entitize/Fakeddit).
+
+> Prior fake news datasets do not provide multimodal text and image data, metadata, comment data, and fine-grained fake news categorization at the scale and breadth of our dataset. We present Fakeddit, a novel multimodal dataset consisting of over 1 million samples from multiple categories of fake news. After being processed through several stages of review, the samples are labeled according to 2-way, 3-way, and 6-way classification categories through distant supervision. We construct hybrid text+image models and perform extensive experiments for multiple variations of classification, demonstrating the importance of the novel aspect of multimodality and fine-grained classification unique to Fakeddit.
+
+Descargar datos de [Google Drive](https://drive.google.com/drive/folders/1qYWWdfdp-OAxKNXbKgAMh2x3p04X55TO?usp=sharing).
+
+Comprobar que los datos se han descargado correctamente
+```{r}
+img_sample <- image_load(path = './data/images/mini50_twoClasses/test/1/7e1cdy.jpg', target_size = c(150, 150))
+img_sample_array <- array_reshape(image_to_array(img_sample), c(1, 150, 150, 3))
+plot(as.raster(img_sample_array[1,,,] / 255))
+```
+
+# Carga de datos
+Directorios:
+```{r}
+dataset_dir           <- './data/images/mini50_twoClasses'
+train_images_dir      <- paste0(dataset_dir, '/train')
+val_images_dir        <- paste0(dataset_dir, '/val')
+test_images_dir       <- paste0(dataset_dir, '/test')
+comments_file          <- './data/comments/all_comments.tsv'
+```
+
+Metadatos:
+```{r}
+metadata_train <- read_tsv(paste0(train_images_dir, "/multimodal_train.tsv"))
+metadata_train <- metadata_train %>%
+  mutate(created_at = as.POSIXct(created_utc, origin="1970-01-01")) %>%
+  select(-one_of('created_utc')) %>%
+  mutate(class = ifelse(`2_way_label` == 0, 'Disinformation', 'Other'))
+```
+
+Comentarios (todos, sin `NA`):
+```{r}
+comments <- read_tsv(comments_file) %>%
+  drop_na()
+```
+
+# Combinar datos
+`left_join()` de la tabla de metadatos y de los comentarios
+```{r}
+metadata_train_comments <- left_join(x = metadata_train, y = comments, 
+                                     by = c("id" = "submission_id"),
+                                     keep = FALSE, suffix = c('.publication', '.comment'))
+metadata_train_comments
+```
+
+# Análisis exploratorio simple (2 clases)
+
+## Distribución de clases
+Seleccionar datos:
+```{r}
+data_binary <- metadata_train %>%
+  select(-one_of('3_way_label', '6_way_label', '2_way_label'))
+```
+
+Mostrar distribución de clases:
+```{r}
+table(data_binary$class)
+
+ggplot(data_binary) +
+  geom_histogram(aes(x = class, fill = class), stat = 'count')
+```
+
+## Evolución
+Evolución temporal (frecuencia acumulada):
+```{r}
+library(scales)
+ggplot(metadata_train, aes(x = created_at)) +
+  geom_histogram(aes(fill = class))
+```
+
+## Autores
+Autores que propagan desinformación:
+```{r}
+plotdata <- data_binary %>%
+  filter(class == "Disinformation") %>%
+  count(author) %>%
+  slice_max(n = 15, order_by = n, with_ties = FALSE)
+  
+ggplot(plotdata) +
+  geom_bar(aes(x = author, y = n), stat = 'identity') +
+  coord_flip()
+```
+
+## Títulos
+Extracción de características:
+```{r}
+data_binary_extended <- data_binary %>%
+  mutate(title_text_exclamations = str_count(title, "!")) %>%
+  mutate(title_text_caps = str_count(title, "[A-Z]")) %>%
+  mutate(title_text_digits = str_count(title, "[0-9]")) %>%
+  mutate(title_text_emojis = str_count(title, '[\U{1F300}-\U{1F6FF}]')) %>%
+  mutate(title_text_emoji_flag = str_count(title, '\U{1F1FA}|\U{1F1F8}]'))
+```
+
+Visualización:
+```{r}
+ggplot(data_binary_extended) + 
+  geom_density(aes(x=title_text_caps, color=class, fill=class), alpha = 0.5)  +
+  scale_x_continuous(trans="log10")
+```
+
+## Comentarios
+Extracción de características:
+```{r}
+data_binary_comments <- metadata_train_comments %>%
+  select(-one_of('3_way_label', '6_way_label', '2_way_label'))
+
+data_binary_comments_extended <- data_binary_comments %>%
+  mutate(body_text_exclamations = str_count(body, "!")) %>%
+  mutate(body_text_caps = str_count(body, "[A-Z]")) %>%
+  mutate(body_text_digits = str_count(body, "[0-9]")) %>%
+  mutate(body_text_emojis = str_count(body, '[\U{1F300}-\U{1F6FF}]')) %>%
+  mutate(body_text_emoji_flag = str_count(body, '\U{1F1FA}|\U{1F1F8}]'))
+```
+
+Visualización:
+```{r}
+ggplot(data_binary_comments_extended) + 
+  geom_density(aes(x=body_text_caps, color=class, fill=class), alpha = 0.5)  +
+  scale_x_continuous(trans="log10")
+```
+# Entrenar modelo de clasificación
+Entrenamos un modelo de clasificación de ejemplo (solo metadatos, no comentarios ni imágenes):
+
+## Particiones de datos
+```{r}
+# train
+data_binary_factors <- data_binary %>%
+  select(-one_of("author", "clean_title", "id", "image_url", "linked_submission_id", "title")) %>%
+  mutate_if(is.character, as.factor)
+imputation <- mice(data_binary_factors, defaultMethod = c('mean', 'logreg', 'polyreg', 'polr'))
+train <- complete(imputation) %>%
+  na.omit()
+
+# validation
+metadata_val <- read_tsv(paste0(val_images_dir, "/multimodal_validate.tsv"))
+metadata_val <- metadata_val %>%
+  mutate(created_at = as.POSIXct(created_utc, origin="1970-01-01")) %>%
+  select(-one_of('created_utc')) %>%
+  mutate(class = ifelse(`2_way_label` == 0, 'Disinformation', 'Other'))
+
+data_val_binary_factors   <- metadata_val %>%
+  select(-one_of('3_way_label', '6_way_label', '2_way_label')) %>%
+  select(-one_of("author", "clean_title", "id", "image_url", "linked_submission_id", "title")) %>%
+  mutate_if(is.character, as.factor)
+imputation <- mice(data_val_binary_factors, defaultMethod = c('mean', 'cart', 'cart', 'cart'))
+val <- complete(imputation) %>%
+  na.omit()
+```
+
+## rpart
+Entrenamiento:
+```{r}
+rpartCtrl <- trainControl(classProbs = TRUE)
+rpartParametersGrid <- expand.grid(.cp = c(0.01, 0.05))
+
+rpartModel <- train(class ~ ., 
+                    data = train, 
+                    method = "rpart", 
+                    metric = "Accuracy", 
+                    trControl = rpartCtrl, 
+                    tuneGrid = rpartParametersGrid)
+```
+
+Visualización:
+```{r}
+rpart.plot(rpartModel$finalModel)
+```
+
+Validación:
+```{r validacion}
+# ajustar niveles
+rpartModel$xlevels[["domain"]] <- union(rpartModel$xlevels[["domain"]], levels(as.factor(val$domain)))
+rpartModel$xlevels[["subreddit"]] <- union(rpartModel$xlevels[["subreddit"]], levels(as.factor(val$subreddit)))
+
+# predicción
+prediction <- predict(rpartModel, val, type = "raw") 
+cm <- confusionMatrix(prediction, val[["class"]])
+cm_prop <- prop.table(cm$table)
+plot(cm$table)
+```
