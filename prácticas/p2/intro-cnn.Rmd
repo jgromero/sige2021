@@ -13,6 +13,9 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(keras)
+
+# install.packages("remotes")
+# remotes::install_github("rstudio/reticulate")
 ```
 
 Clasificación con el dataset [Fakeddit](https://github.com/entitize/Fakeddit).
