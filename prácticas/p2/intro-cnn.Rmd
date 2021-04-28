@@ -1,0 +1,146 @@
+---
+title: "Deep Learning con conjunto de datos Fakeddit"
+output:
+  html_document:
+      code_folding: "show"
+      toc: true
+      toc_depth: 2
+      toc_float: true
+      df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(keras)
+```
+
+Clasificación con el dataset [Fakeddit](https://github.com/entitize/Fakeddit).
+
+> Prior fake news datasets do not provide multimodal text and image data, metadata, comment data, and fine-grained fake news categorization at the scale and breadth of our dataset. We present Fakeddit, a novel multimodal dataset consisting of over 1 million samples from multiple categories of fake news. After being processed through several stages of review, the samples are labeled according to 2-way, 3-way, and 6-way classification categories through distant supervision. We construct hybrid text+image models and perform extensive experiments for multiple variations of classification, demonstrating the importance of the novel aspect of multimodality and fine-grained classification unique to Fakeddit.
+
+Descargar datos de [Google Drive](https://drive.google.com/drive/folders/1qYWWdfdp-OAxKNXbKgAMh2x3p04X55TO?usp=sharing).
+
+```{r}
+img_sample <- image_load(path = './cqqjupm.jpg', target_size = c(150, 150))
+img_sample_array <- array_reshape(image_to_array(img_sample), c(1, 150, 150, 3))
+plot(as.raster(img_sample_array[1,,,] / 255))
+```
+
+
+# Carga de datos
+Directorios:
+```{r}
+dataset_dir           <- './medium10000_twoClasses/'
+train_images_dir      <- paste0(dataset_dir, 'train')
+val_images_dir        <- paste0(dataset_dir, 'val')
+test_images_dir       <- paste0(dataset_dir, 'test')
+```
+
+Generadores:
+```{r}
+# https://tensorflow.rstudio.com/keras/reference/image_data_generator.html 
+train_images_generator <- image_data_generator(rescale = 1/255)
+val_images_generator   <- image_data_generator(rescale = 1/255)
+test_images_generator  <- image_data_generator(rescale = 1/255)
+```
+
+Flujos:
+```{r}
+# https://tensorflow.rstudio.com/keras/reference/flow_images_from_directory.html
+# https://forums.fast.ai/t/split-data-using-fit-generator/4380/4
+train_generator_flow <- flow_images_from_directory(
+  directory = train_images_dir,
+  generator = train_images_generator,
+  class_mode = 'categorical',
+  batch_size = 128,
+  target_size = c(64, 64)         # (w x h) --> (64 x 64)
+)
+
+validation_generator_flow <- flow_images_from_directory(
+  directory = val_images_dir,
+  generator = val_images_generator,
+  class_mode = 'categorical',
+  batch_size = 128,
+  target_size = c(64, 64)         # (w x h) --> (64 x 64)
+)
+
+test_generator_flow <- flow_images_from_directory(
+  directory = test_images_dir,
+  generator = test_images_generator,
+  class_mode = 'categorical',
+  batch_size = 128,
+  target_size = c(64, 64)         # (w x h) --> (64 x 64)
+)
+```
+
+# Creación del modelo
+
+Definición de arquitectura:
+```{r}
+model <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 32,  kernel_size = c(3, 3), activation = "relu", input_shape = c(64, 64, 3)) %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 64,  kernel_size = c(3, 3), activation = "relu") %>% layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 128, kernel_size = c(3, 3), activation = "relu") %>% layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 128, kernel_size = c(3, 3), activation = "relu") %>% layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_flatten() %>%
+  layer_dense(units = 512, activation = "relu") %>%
+  layer_dense(units = 2, activation = "softmax")
+```
+
+Compilar modelo:
+```{r}
+model %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = optimizer_rmsprop(),
+  metrics = c('accuracy')
+)
+```
+
+# Entrenamiento y validación
+
+```{r}
+history <- model %>% 
+  fit_generator(
+    generator = train_generator_flow, 
+    validation_data = validation_generator_flow,
+    steps_per_epoch = 10,
+    epochs = 10
+  )
+
+plot(history)
+```
+
+# Test
+Métricas:
+```{r}
+metrics <- model %>% 
+  evaluate_generator(test_generator_flow, steps = 1)
+  
+message("  loss: ", metrics[1])
+message("  accuracy: ", metrics[2])
+```
+
+Matriz de confusión:
+```{r message=FALSE}
+predictions <- predict_generator(model, test_generator_flow, steps = 10)
+
+y_true <- test_generator_flow$classes
+y_pred <- ifelse(predictions[,1] > 0.55, 1, 0)
+
+library(caret)
+cm <- confusionMatrix(as.factor(y_true), as.factor(y_pred))
+cm_prop <- prop.table(cm$table)
+plot(cm$table)
+```
+
+Visualizar matriz de confusión:
+```{r}
+library(scales)
+cm_tibble <- as_tibble(cm$table)
+ggplot(data = cm_tibble) + 
+  geom_tile(aes(x=Reference, y=Prediction, fill=n), colour = "white") +
+  geom_text(aes(x=Reference, y=Prediction, label=n), colour = "white") +
+  scale_fill_continuous(trans = 'reverse')
+```
