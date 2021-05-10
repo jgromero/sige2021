@@ -84,14 +84,14 @@ with(mlflow_start_run(), {
   # Por ejemplo, para estudio de dropout + epochs
   mlflow_log_param("dropout", dropout)
   mlflow_log_param("epochs", epochs)
-  mlflow_log_metric("loss", metrics$loss)
-  mlflow_log_metric("accuracy", metrics$accuracy)
+  mlflow_log_metric("loss", metrics["loss"])
+  mlflow_log_metric("accuracy", metrics["accuracy"])
   
   # Guardar modelo
   mlflow_log_model(model, "model")
   
   # Mostrar salida
   message("CNN model (dropout=", dropout, ", epochs=", epochs, "):")
-  message("  loss: ", metrics$loss)
-  message("  accuracy: ", metrics$accuracy)
+  message("  loss: ", metrics["loss"])
+  message("  accuracy: ", metrics["accuracy"])
 })
