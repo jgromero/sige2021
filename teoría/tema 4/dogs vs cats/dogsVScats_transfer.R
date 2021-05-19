@@ -1,6 +1,6 @@
 ## -------------------------------------------------------------------------------------
 ## Sistemas Inteligentes para la Gestión en la Empresa
-## Curso 2019-2020
+## Curso 2020-2021
 ## Juan Gómez Romero
 ## Ejemplo basado en 'Deep Learning with R'
 ## -------------------------------------------------------------------------------------
