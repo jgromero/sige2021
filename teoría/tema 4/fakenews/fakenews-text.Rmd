@@ -1,0 +1,262 @@
+---
+title: "Clasificación con conjunto de datos sobre desinformación"
+author: "Juan Gómez Romero"
+date: "4 de marzo de 2021"
+output:
+  html_document:
+      code_folding: "show"
+      toc: true
+      toc_depth: 2
+      toc_float: true
+      df_print: paged
+---
+
+Este cuaderno está basado en el trabajo del artículo ([Molina-Solana, Amador, Gómez-Romero, 2018](https://sci2s.ugr.es/caepia18/proceedings/docs/CAEPIA2018_paper_207.pdf)), en el que se muestra que las aproximaciones basadas en texto para clasificación de noticias falsas pueden ser más efectivas que las basadas únicamente en metadatos.
+
+> M. Molina-Solana, J. Amador, J. Gómez-Romero, "Deep Learning for Fake News Classification," in Proceedings of CAEPIA 2018, I Workshop on Deep Learning, pp. 1197-1201, 2018.
+
+Los datos completos pueden descargarse de [Zenodo](https://zenodo.org/record/1048826).
+
+# Lectura de datos
+
+## Carga de datos
+
+```{r carga, include=FALSE}
+library(tidyverse)
+library(readxl)
+data_raw <- read_excel('twitter_fakenews_USElections_2016.xlsx', sheet = 1, na = c('UNKNOWN'))
+data_raw
+```
+
+## Transformación de datos fecha
+
+```{r fechas}
+Sys.setlocale("LC_ALL","C")  # Locale for date format
+data_raw$created_at <- as.POSIXct(data_raw$created_at, tz="GMT", format="%a %b %d %H:%M:%S +0000 %Y")
+data_raw
+```
+
+## Filtrado de información
+
+Seleccionamos solo tuits virales, sin NAs en cualquier columna:
+
+```{r filtrado}
+data <- data_raw %>% 
+  filter(retweet_count > 1000) %>%
+  na.exclude()
+```
+
+## Preprocesamiento
+
+Seleccionamos el texto y la variable de clasificación:
+
+```{r seleccion-variables}
+data_classification <-
+  data %>%
+  mutate(Class = ifelse(is_fake_news, 1, 0)) %>%
+  select(text, Class)
+  
+texts  <- data_classification$text
+labels <- data_classification$Class
+```
+
+# Preprocesamiento y carga de 'embeddings'
+
+## Tokenizar y ajustar el formato del texto de entrada
+
+Para crear los tokens, se utilizan las funciones [`text_tokenizer()`](https://www.rdocumentation.org/packages/keras/versions/0.3.5/topics/text_tokenizer) y [`fit_text_tokenizer()`](https://www.rdocumentation.org/packages/keras/versions/2.4.0/topics/fit_text_tokenizer) de `keras`:
+
+```{r tokenizar}
+library(keras)
+maxlen <- 256      # Se consideran los primeros 256 caracteres de cada texto
+max_words <- 10000 # Maximo de palabras que se consideraran
+
+tokenizer <- text_tokenizer(num_words = max_words) %>%
+  fit_text_tokenizer(texts)
+
+sequences <- texts_to_sequences(tokenizer, texts)
+
+word_index = tokenizer$word_index
+cat("Se encontraron", length(word_index), "tokens unicos.\n")
+
+text_data <- pad_sequences(sequences, maxlen = maxlen)
+
+cat("Dimensiones de datos:", dim(text_data), "\n")
+cat("Número de etiquetas:", length(labels), "\n")
+```
+
+## Conjuntos de entrenamiento y validación
+
+Tomamos una selección aleatoria para los datos de entrenamiento y validación.
+
+```{r particion-datos}
+training_samples   <- 6000  # Numero de ejemplos de entrenamiento
+validation_samples <- 2626  # Number of ejemplos de validación
+
+set.seed(0)
+indices <- sample(1:nrow(data))
+training_indices   <- indices[1:training_samples]
+validation_indices <- indices[(training_samples + 1):(training_samples + validation_samples)]
+
+x_train <- text_data[training_indices,]
+y_train <- labels[training_indices]
+x_val   <- text_data[validation_indices,]
+y_val   <- labels[validation_indices]
+```
+
+## Cargar embeddings pre-entrenados
+
+Utilizaremos los 'embeddings' [Glove](http://nlp.stanford.edu/data/glove.6B.zip), disponibles públicamente. Nos quedamos con la versión de tamaño de 'embedding' 100 (*100d*).
+
+```{r cargar-embeddings1}
+lines <- readLines('glove/glove.6B.100d.txt')
+```
+
+Una línea de este fichero de 'embeddings' tiene el siguiente aspecto:
+
+```{r cargar-embeddings2}
+lines[[1]]
+```
+
+Los 'embeddings' se almacenan en una matriz creada a partir de un diccionario *palabra* --\> *codificación*:
+
+```{r cargar-embeddings3}
+embeddings_index <- new.env(hash = TRUE, parent = emptyenv())
+for (i in 1:length(lines)) {
+  line <- lines[[i]]
+  values <- strsplit(line, " ")[[1]]
+  word <- values[[1]]
+  embeddings_index[[word]] <- as.double(values[-1])
+}
+cat("Se encontraron", length(embeddings_index), "palabras con representación de vector.\n")
+
+embedding_dim <- 100
+embedding_matrix <- array(0, c(max_words, embedding_dim))
+for (word in names(word_index)) {
+  index <- word_index[[word]]
+  if (index < max_words) {
+    embedding_vector <- embeddings_index[[word]]
+    if (!is.null(embedding_vector))
+      embedding_matrix[index+1,] <- embedding_vector
+  } 
+}
+```
+
+# Entrenamiento
+
+## MLP sin 'embeddings'
+
+```{r mlp-no-embeddings}
+model1 <- keras_model_sequential() %>%
+  layer_embedding(input_dim = max_words, output_dim = embedding_dim, input_length = maxlen) %>%
+  layer_flatten() %>%
+  layer_dense(units = 32,  activation = "relu") %>%
+  layer_dense(units = 1,   activation = "sigmoid")
+summary(model1)
+
+model1 %>% compile(
+  loss = 'binary_crossentropy',
+  optimizer = optimizer_rmsprop(),
+  metrics = c('accuracy')
+)
+
+history1 <- model1 %>% fit(
+  x_train, y_train,
+  epochs = 10,
+  batch_size = 32,
+  validation_data = list(x_val, y_val)
+)
+
+evaluation1  <- model1 %>% evaluate(x_val, y_val)
+```
+
+## MLP con los 'embeddings' preentrenados
+
+```{r mlp-con-embeddings}
+model2 <- keras_model_sequential() %>%
+  layer_embedding(input_dim = max_words, output_dim = embedding_dim, input_length = maxlen) %>%
+  layer_flatten() %>%
+  layer_dense(units = 32,  activation = "relu") %>%
+  layer_dense(units = 1,   activation = "sigmoid")
+summary(model2)
+
+get_layer(model2, index = 1) %>%
+  set_weights(list(embedding_matrix)) %>%
+  freeze_weights()
+
+model2 %>% compile(
+  loss = 'binary_crossentropy',
+  optimizer = optimizer_rmsprop(),
+  metrics = c('accuracy')
+)
+
+history2 <- model2 %>% fit(
+  x_train, y_train,
+  epochs = 10,
+  batch_size = 32,
+  validation_data = list(x_val, y_val)
+)
+
+evaluation2  <- model2 %>% evaluate(x_val, y_val)
+```
+
+## LSTM sin 'embeddings'
+
+```{r lstm-no-embeddings}
+model3 <- keras_model_sequential() %>%
+  layer_embedding(input_dim = max_words, output_dim = embedding_dim, input_length = maxlen) %>%
+  layer_lstm(units = 32) %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+model3 %>% compile(
+  loss = 'binary_crossentropy',
+  optimizer = optimizer_rmsprop(),
+  metrics = c('accuracy')
+)
+
+history3 <- model3 %>% fit(
+  x_train, y_train,
+  epochs = 10,
+  batch_size = 32,
+  validation_data = list(x_val, y_val)
+)
+
+evaluation3  <- model3 %>% evaluate(x_val, y_val)
+```
+
+## LSTM con 'embeddings'
+
+```{r lstm-con-embeddings}
+model4 <- keras_model_sequential() %>%
+  layer_embedding(input_dim = max_words, output_dim = embedding_dim, input_length = maxlen) %>%
+  layer_lstm(units = 32) %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+get_layer(model4, index = 1) %>%
+  set_weights(list(embedding_matrix)) %>%
+  freeze_weights()
+
+model4 %>% compile(
+  loss = 'binary_crossentropy',
+  optimizer = optimizer_rmsprop(),
+  metrics = c('accuracy')
+)
+
+history4 <- model4 %>% fit(
+  x_train, y_train,
+  epochs = 10,
+  batch_size = 32,
+  validation_data = list(x_val, y_val)
+)
+
+evaluation4  <- model4 %>% evaluate(x_val, y_val)
+```
+
+## Resumen de resultados
+
+| Modelo         | Loss (val)           | Acc (val)            |
+|----------------|----------------------|----------------------|
+| MLP            | `r evaluation1[[1]]` | `r evaluation1[[2]]` |
+| MLP con Glove  | `r evaluation2[[1]]` | `r evaluation2[[2]]` |
+| LSTM           | `r evaluation3[[1]]` | `r evaluation3[[2]]` |
+| LSTM con Glove | `r evaluation4[[1]]` | `r evaluation4[[2]]` |
