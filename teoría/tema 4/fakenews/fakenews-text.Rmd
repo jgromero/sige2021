@@ -3,12 +3,15 @@ title: "Clasificación con conjunto de datos sobre desinformación"
 author: "Juan Gómez Romero"
 date: "4 de marzo de 2021"
 output:
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
   html_document:
-      code_folding: "show"
-      toc: true
-      toc_depth: 2
-      toc_float: true
-      df_print: paged
+    code_folding: show
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    df_print: paged
 ---
 
 Este cuaderno está basado en el trabajo del artículo ([Molina-Solana, Amador, Gómez-Romero, 2018](https://sci2s.ugr.es/caepia18/proceedings/docs/CAEPIA2018_paper_207.pdf)), en el que se muestra que las aproximaciones basadas en texto para clasificación de noticias falsas pueden ser más efectivas que las basadas únicamente en metadatos.
@@ -21,7 +24,7 @@ Los datos completos pueden descargarse de [Zenodo](https://zenodo.org/record/104
 
 ## Carga de datos
 
-```{r carga, include=FALSE}
+```{r carga}
 library(tidyverse)
 library(readxl)
 data_raw <- read_excel('twitter_fakenews_USElections_2016.xlsx', sheet = 1, na = c('UNKNOWN'))
@@ -68,7 +71,7 @@ Para crear los tokens, se utilizan las funciones [`text_tokenizer()`](https://ww
 
 ```{r tokenizar}
 library(keras)
-maxlen <- 256      # Se consideran los primeros 256 caracteres de cada texto
+maxlen <- 50       # Se consideran las primeras 256 palabras de cada texto
 max_words <- 10000 # Maximo de palabras que se consideraran
 
 tokenizer <- text_tokenizer(num_words = max_words) %>%
@@ -82,7 +85,7 @@ cat("Se encontraron", length(word_index), "tokens unicos.\n")
 text_data <- pad_sequences(sequences, maxlen = maxlen)
 
 cat("Dimensiones de datos:", dim(text_data), "\n")
-cat("Número de etiquetas:", length(labels), "\n")
+cat("Número de ejemplos:", length(labels), "\n")
 ```
 
 ## Conjuntos de entrenamiento y validación
